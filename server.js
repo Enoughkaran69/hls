@@ -16,6 +16,18 @@ if (!fs.existsSync(downloadsDir)) {
     fs.mkdirSync(downloadsDir);
 }
 
+// Serve a simple homepage
+app.get("/", (req, res) => {
+    res.send(`
+        <h1>HLS Downloader</h1>
+        <form action="/download" method="post">
+            <label for="hlsUrl">Enter HLS URL:</label><br>
+            <input type="text" id="hlsUrl" name="hlsUrl" required><br><br>
+            <button type="submit">Download</button>
+        </form>
+    `);
+});
+
 // Route to handle HLS downloads
 app.post("/download", (req, res) => {
     const { hlsUrl } = req.body;
@@ -27,9 +39,8 @@ app.post("/download", (req, res) => {
     const outputPath = path.join(downloadsDir, `output_${Date.now()}.mp4`);
 
     // ffmpeg command to download and merge HLS
-const ffmpegPath = path.join(__dirname, "bin", "ffmpeg");
-const command = `${ffmpegPath} -i "${hlsUrl}" -c copy -bsf:a aac_adtstoasc "${outputPath}"`;
-
+    const ffmpegPath = path.join(__dirname, "bin", "ffmpeg");
+    const command = `${ffmpegPath} -i "${hlsUrl}" -c copy -bsf:a aac_adtstoasc "${outputPath}"`;
 
     exec(command, (error, stdout, stderr) => {
         if (error) {
