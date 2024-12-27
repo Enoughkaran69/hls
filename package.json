@@ -4,6 +4,7 @@
   "description": "A simple HLS downloader using ffmpeg",
   "main": "server.js",
   "scripts": {
+    "postinstall": "chmod +x bin/ffmpeg",
     "start": "node server.js"
   },
   "dependencies": {
