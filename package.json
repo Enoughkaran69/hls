@@ -1,0 +1,12 @@
+{
+  "name": "hls-downloader",
+  "version": "1.0.0",
+  "description": "A simple HLS downloader using ffmpeg",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
