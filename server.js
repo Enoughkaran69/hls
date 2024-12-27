@@ -40,9 +40,9 @@ app.post("/download", (req, res) => {
 
     // ffmpeg command to download and merge HLS
     const ffmpegPath = path.join(__dirname, "bin", "ffmpeg");
-    try {
-    // Set the executable flag on Windows (no-op if unnecessary)
-    execSync(`icacls ${ffmpegPath} /grant Everyone:(F)`);
+try {
+    // Set the executable flag on Render (Linux)
+    execSync(`chmod +x ${ffmpegPath}`);
     console.log("Permissions updated for ffmpeg.");
 } catch (err) {
     console.error("Failed to set permissions for ffmpeg:", err);
