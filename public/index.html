@@ -27,6 +27,7 @@
         const hlsUrlInput = document.getElementById("hlsUrl");
         const videoPlayer = document.getElementById("videoPlayer");
         const streamList = document.getElementById("streamList");
+        let selectedStreamIndex = null;  // Variable to track the selected stream index
 
         loadStreamButton.addEventListener("click", () => {
             const hlsUrl = hlsUrlInput.value;
@@ -49,10 +50,15 @@
                     availableStreams.forEach((stream, index) => {
                         const listItem = document.createElement("li");
                         listItem.textContent = `Stream ${index + 1}: ${stream.height}p, ${stream.bitrate}bps`;
-                        listItem.onclick = () => {
-                            hls.startLevel = index;
-                            console.log(`Switched to stream ${index + 1}`);
+
+                        const downloadButton = document.createElement("button");
+                        downloadButton.textContent = "Download";
+                        downloadButton.onclick = () => {
+                            selectedStreamIndex = index;
+                            downloadStream(availableStreams[selectedStreamIndex]);
                         };
+
+                        listItem.appendChild(downloadButton);
                         streamList.appendChild(listItem);
                     });
                 });
@@ -84,6 +90,39 @@
             } else {
                 alert("Your browser does not support HLS.js. Please use a compatible browser.");
             }
+        }
+
+        // Function to handle stream download
+        function downloadStream(stream) {
+            const hlsUrl = hlsUrlInput.value;
+
+            // Send download request to the server
+            fetch('/download', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    hlsUrl: hlsUrl,
+                    streamIndex: selectedStreamIndex
+                })
+            })
+            .then(response => response.blob())
+            .then(blob => {
+                // Create a link and trigger the download
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.style.display = "none";
+                a.href = url;
+                a.download = `stream_${selectedStreamIndex + 1}.mp4`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            })
+            .catch(err => {
+                console.error("Error downloading stream:", err);
+                alert("Failed to download the stream.");
+            });
         }
     </script>
 </body>
