@@ -38,18 +38,6 @@ app.get("/", (req, res) => {
     `);
 });
 
-// Route to handle HLS downloads
-app.post("/download", (req, res) => {
-    const { hlsUrl } = req.body;
-
-    if (!hlsUrl) {
-        return res.status(400).send("HLS URL is required.");
-    }
-
-    const outputPath = path.join(downloadsDir, `output_${Date.now()}.mp4`);
-
-    // ffmpeg command to download and merge HLS
-
 
 
 
