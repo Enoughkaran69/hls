@@ -29,7 +29,6 @@ wss.on('connection', (ws) => {
     });
 });
 
-// Handle the /download endpoint
 app.post("/download", (req, res) => {
     const { hlsUrl } = req.body;
 
@@ -37,56 +36,37 @@ app.post("/download", (req, res) => {
         return res.status(400).send("HLS URL is required.");
     }
 
-    // Create a unique file path for saving the video
-    const outputPath = path.join(downloadsDir, `output_${Date.now()}.mp4`);
+    // Get stream info using ffmpeg
+    const command = `ffmpeg -i "${hlsUrl}"`;
 
-    // ffmpeg command to download and merge both video and audio
-    const command = `ffmpeg -i "${hlsUrl}" -map 0:v:0 -map 0:a:0 -c copy -bsf:a aac_adtstoasc -f mp4 "${outputPath}"`;
-
-    // Track progress
-    let progressOutput = "";
-    const ffmpegProcess = exec(command);
-
-    // Capture ffmpeg output for progress tracking
-    ffmpegProcess.stdout.on("data", (data) => {
-        progressOutput += data.toString();
-
-        // Extract the timestamp from ffmpeg output
-        const match = progressOutput.match(/time=(\d+:\d+:\d+\.\d+)/);
-        if (match) {
-            const time = match[1]; // Extract the timestamp
-            console.log(`Progress: ${time}`);
-
-            // Send progress to the client via WebSocket
-            wss.clients.forEach((client) => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(time);  // Send the progress to the client
-                }
-            });
+    exec(command, (error, stdout, stderr) => {
+        if (error) {
+            console.error(`exec error: ${error}`);
+            return res.status(500).send("Failed to fetch stream information.");
         }
-    });
 
-    ffmpegProcess.stderr.on("data", (data) => {
-        console.error(`stderr: ${data}`);
-    });
+        const streams = parseFFMpegStreams(stderr);  // Custom function to extract stream info from ffmpeg output
 
-    ffmpegProcess.on("close", (code) => {
-        if (code === 0) {
-            console.log("Download complete!");
-            // Send the video file as a response once the process is done
-            res.download(outputPath, "video.mp4", (err) => {
-                if (err) {
-                    console.error(err);
-                }
-                // Clean up the file after sending
-                fs.unlinkSync(outputPath);
-            });
-        } else {
-            console.error(`ffmpeg process exited with code ${code}`);
-            res.status(500).send("Failed to process the HLS link.");
-        }
+        // Send stream information back to client
+        res.json({ streams });
     });
 });
+
+// Helper function to extract stream info from ffmpeg output
+function parseFFMpegStreams(stderr) {
+    const streamDetails = [];
+    const regex = /Stream #\d+:(\d+)[^:]*: Video: (.*), (\d+)x(\d+)/g;
+    let match;
+    while ((match = regex.exec(stderr)) !== null) {
+        streamDetails.push({
+            type: "video",
+            resolution: `${match[3]}x${match[4]}`,
+            codec: match[2],
+        });
+    }
+    return streamDetails;
+}
+
 
 // WebSocket server listens on the same port as the HTTP server
 app.server = app.listen(PORT, () => {
