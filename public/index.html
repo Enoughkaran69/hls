@@ -3,26 +3,88 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HLS Downloader</title>
+    <title>Live HLS Stream Player</title>
 </head>
 <body>
-    <h1>HLS Downloader</h1>
-    <form action="/download" method="post">
-        <label for="hlsUrl">Enter HLS URL:</label><br>
-        <input type="text" id="hlsUrl" name="hlsUrl" required><br><br>
-        <button type="submit">Download</button>
-    </form>
+    <h1>Live HLS Stream</h1>
 
-    <div id="progress">Progress: 0%</div>
+    <label for="hlsUrl">Enter HLS URL:</label>
+    <input type="text" id="hlsUrl" placeholder="Enter HLS stream URL" />
+    <button id="loadStream">Load Stream</button>
 
+    <div id="player-container">
+        <video id="videoPlayer" controls></video>
+    </div>
+
+    <div id="streamDetails">
+        <h3>Available Streams:</h3>
+        <ul id="streamList"></ul>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script>
-        // WebSocket connection to the server
-        const socket = new WebSocket('ws://localhost:3000/ws');
+        const loadStreamButton = document.getElementById("loadStream");
+        const hlsUrlInput = document.getElementById("hlsUrl");
+        const videoPlayer = document.getElementById("videoPlayer");
+        const streamList = document.getElementById("streamList");
 
-        socket.onmessage = function (event) {
-            const progress = document.getElementById('progress');
-            progress.innerText = 'Progress: ' + event.data;  // Update the progress
-        };
+        loadStreamButton.addEventListener("click", () => {
+            const hlsUrl = hlsUrlInput.value;
+            if (!hlsUrl) return alert("Please enter an HLS URL.");
+
+            // Clear previous streams and start loading the new stream
+            streamList.innerHTML = "";
+            loadHLSStream(hlsUrl);
+        });
+
+        // Load HLS stream and show available streams
+        function loadHLSStream(url) {
+            if (Hls.isSupported()) {
+                const hls = new Hls();
+                hls.loadSource(url);
+
+                // When the HLS stream is loaded
+                hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
+                    const availableStreams = data.levels;
+                    availableStreams.forEach((stream, index) => {
+                        const listItem = document.createElement("li");
+                        listItem.textContent = `Stream ${index + 1}: ${stream.height}p, ${stream.bitrate}bps`;
+                        listItem.onclick = () => {
+                            hls.startLevel = index;
+                            console.log(`Switched to stream ${index + 1}`);
+                        };
+                        streamList.appendChild(listItem);
+                    });
+                });
+
+                // Attach HLS stream to the video player
+                hls.attachMedia(videoPlayer);
+                hls.on(Hls.Events.MANIFEST_LOADED, function () {
+                    videoPlayer.play();
+                });
+
+                // Handle errors
+                hls.on(Hls.Events.ERROR, function (event, data) {
+                    if (data.fatal) {
+                        switch (data.fatal) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                alert("Network error");
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                alert("Media error");
+                                break;
+                            case Hls.ErrorTypes.LEVEL_LOAD_ERROR:
+                                alert("Level load error");
+                                break;
+                            default:
+                                alert("An error occurred");
+                        }
+                    }
+                });
+            } else {
+                alert("Your browser does not support HLS.js. Please use a compatible browser.");
+            }
+        }
     </script>
 </body>
 </html>
