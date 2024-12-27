@@ -27,7 +27,6 @@
         const hlsUrlInput = document.getElementById("hlsUrl");
         const videoPlayer = document.getElementById("videoPlayer");
         const streamList = document.getElementById("streamList");
-        let selectedStreamIndex = null;  // Variable to track the selected stream index
 
         loadStreamButton.addEventListener("click", () => {
             const hlsUrl = hlsUrlInput.value;
@@ -40,81 +39,63 @@
 
         // Load HLS stream and show available streams
         function loadHLSStream(url) {
-            if (Hls.isSupported()) {
-                const hls = new Hls();
-                hls.loadSource(url);
+            fetch("/getStreams", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ hlsUrl: url })
+            })
+            .then(response => response.json())
+            .then(data => {
+                const availableStreams = data.streams;
+                availableStreams.forEach((stream, index) => {
+                    const listItem = document.createElement("li");
+                    listItem.textContent = `Stream ${index + 1}: ${stream.resolution}, ${stream.codec}`;
 
-                // When the HLS stream is loaded
-                hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
-                    const availableStreams = data.levels;
-                    availableStreams.forEach((stream, index) => {
-                        const listItem = document.createElement("li");
-                        listItem.textContent = `Stream ${index + 1}: ${stream.height}p, ${stream.bitrate}bps`;
+                    const downloadButton = document.createElement("button");
+                    downloadButton.textContent = "Download";
+                    downloadButton.onclick = () => downloadStream(index);
 
-                        const downloadButton = document.createElement("button");
-                        downloadButton.textContent = "Download";
-                        downloadButton.onclick = () => {
-                            selectedStreamIndex = index;
-                            downloadStream(availableStreams[selectedStreamIndex]);
-                        };
-
-                        listItem.appendChild(downloadButton);
-                        streamList.appendChild(listItem);
-                    });
+                    listItem.appendChild(downloadButton);
+                    streamList.appendChild(listItem);
                 });
 
-                // Attach HLS stream to the video player
-                hls.attachMedia(videoPlayer);
-                hls.on(Hls.Events.MANIFEST_LOADED, function () {
+                // Load the first stream into the video player
+                if (availableStreams.length > 0) {
+                    const hls = new Hls();
+                    hls.loadSource(url);
+                    hls.attachMedia(videoPlayer);
                     videoPlayer.play();
-                });
-
-                // Handle errors
-                hls.on(Hls.Events.ERROR, function (event, data) {
-                    if (data.fatal) {
-                        switch (data.fatal) {
-                            case Hls.ErrorTypes.NETWORK_ERROR:
-                                alert("Network error");
-                                break;
-                            case Hls.ErrorTypes.MEDIA_ERROR:
-                                alert("Media error");
-                                break;
-                            case Hls.ErrorTypes.LEVEL_LOAD_ERROR:
-                                alert("Level load error");
-                                break;
-                            default:
-                                alert("An error occurred");
-                        }
-                    }
-                });
-            } else {
-                alert("Your browser does not support HLS.js. Please use a compatible browser.");
-            }
+                }
+            })
+            .catch(error => {
+                console.error("Error loading streams:", error);
+                alert("Failed to load streams.");
+            });
         }
 
-        // Function to handle stream download
-        function downloadStream(stream) {
+        // Function to download the selected stream
+        function downloadStream(streamIndex) {
             const hlsUrl = hlsUrlInput.value;
 
-            // Send download request to the server
-            fetch('/download', {
+            fetch('/downloadStream', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
                     hlsUrl: hlsUrl,
-                    streamIndex: selectedStreamIndex
+                    streamIndex: streamIndex
                 })
             })
             .then(response => response.blob())
             .then(blob => {
-                // Create a link and trigger the download
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.style.display = "none";
                 a.href = url;
-                a.download = `stream_${selectedStreamIndex + 1}.mp4`;
+                a.download = `stream_${streamIndex + 1}.mp4`;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
