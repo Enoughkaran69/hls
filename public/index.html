@@ -7,45 +7,22 @@
 </head>
 <body>
     <h1>HLS Downloader</h1>
-    <form id="download-form">
-        <label for="hlsUrl">Enter HLS URL:</label>
-        <input type="text" id="hlsUrl" name="hlsUrl" required />
+    <form action="/download" method="post">
+        <label for="hlsUrl">Enter HLS URL:</label><br>
+        <input type="text" id="hlsUrl" name="hlsUrl" required><br><br>
         <button type="submit">Download</button>
     </form>
 
-    <p id="status"></p>
+    <div id="progress">Progress: 0%</div>
 
     <script>
-        document.getElementById("download-form").addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const hlsUrl = document.getElementById("hlsUrl").value;
-            document.getElementById("status").innerText = "Processing...";
+        // WebSocket connection to the server
+        const socket = new WebSocket('ws://localhost:3000/ws');
 
-            try {
-                const response = await fetch("/download", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ hlsUrl }),
-                });
-
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = "video.mp4";
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    document.getElementById("status").innerText = "Download complete!";
-                } else {
-                    document.getElementById("status").innerText = "Failed to download.";
-                }
-            } catch (err) {
-                console.error(err);
-                document.getElementById("status").innerText = "Error occurred.";
-            }
-        });
+        socket.onmessage = function (event) {
+            const progress = document.getElementById('progress');
+            progress.innerText = 'Progress: ' + event.data;  // Update the progress
+        };
     </script>
 </body>
 </html>
