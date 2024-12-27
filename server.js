@@ -50,22 +50,48 @@ app.post("/download", (req, res) => {
     }
 
     const outputPath = path.join(downloadsDir, `output_${Date.now()}.mp4`);
+        // Ensure the output directory exists
+    if (!fs.existsSync(downloadsDir)) {
+        fs.mkdirSync(downloadsDir);
+    }
 
-    const command = `ffmpeg -i "${hlsUrl}" -c copy -bsf:a aac_adtstoasc "${outputPath}"`;
 
-    exec(command, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Error: ${stderr}`);
-            return res.status(500).send("Failed to process the HLS link.");
+  // ffmpeg command to download both audio and video from HLS stream
+    const command = `ffmpeg -i "${hlsUrl}" -map 0:v:0 -map 0:a:0 -c copy -bsf:a aac_adtstoasc -f mp4 "${outputPath}"`;
+
+     // Capture ffmpeg output
+    process.stdout.on("data", (data) => {
+        progressOutput += data.toString();
+        
+        // Extract the percentage of progress from ffmpeg output
+        const match = progressOutput.match(/time=(\d+:\d+:\d+\.\d+)/);
+        if (match) {
+            const time = match[1]; // Extract the timestamp
+            console.log(`Progress: ${time}`);
+            // You can send this progress data to the client using WebSocket, or you can implement polling.
         }
+    });
 
-        res.download(outputPath, "video.mp4", (err) => {
-            if (err) {
-                console.error(err);
-            }
+    process.stderr.on("data", (data) => {
+        console.error(`stderr: ${data}`);
+    });
 
-            fs.unlinkSync(outputPath);
-        });
+    
+      process.on("close", (code) => {
+        if (code === 0) {
+            console.log("Download complete!");
+            // Send the video file as a response once the process is done
+            res.download(outputPath, "video.mp4", (err) => {
+                if (err) {
+                    console.error(err);
+                }
+                // Clean up the file after sending
+                fs.unlinkSync(outputPath);
+            });
+        } else {
+            console.error(`ffmpeg process exited with code ${code}`);
+            res.status(500).send("Failed to process the HLS link.");
+        }
     });
 });
 
