@@ -15,6 +15,9 @@ const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const ffmpegPath = '/bin/ffmpeg';  // Adjust path if needed
+console.log(`Using ffmpeg at path: ${ffmpegPath}`);
+
 
 // Middleware to parse JSON requests
 app.use(express.json());
