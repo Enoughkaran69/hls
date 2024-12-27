@@ -40,6 +40,13 @@ app.post("/download", (req, res) => {
 
     // ffmpeg command to download and merge HLS
     const ffmpegPath = path.join(__dirname, "bin", "ffmpeg");
+    try {
+    // Set the executable flag on Windows (no-op if unnecessary)
+    execSync(`icacls ${ffmpegPath} /grant Everyone:(F)`);
+    console.log("Permissions updated for ffmpeg.");
+} catch (err) {
+    console.error("Failed to set permissions for ffmpeg:", err);
+}
     const command = `${ffmpegPath} -i "${hlsUrl}" -c copy -bsf:a aac_adtstoasc "${outputPath}"`;
 
     exec(command, (error, stdout, stderr) => {
