@@ -1,6 +1,14 @@
 const express = require("express");
 const { exec } = require("child_process");
 const { execSync } = require("child_process"); // Import execSync
+exec("ffmpeg -version", (error, stdout, stderr) => {
+    if (error) {
+        console.error(`Error checking ffmpeg version: ${error}`);
+        return;
+    }
+    console.log(`ffmpeg version info: ${stdout}`);
+});
+
 
 const path = require("path");
 const fs = require("fs");
@@ -41,33 +49,9 @@ app.post("/download", (req, res) => {
     const outputPath = path.join(downloadsDir, `output_${Date.now()}.mp4`);
 
     // ffmpeg command to download and merge HLS
-    const ffmpegPath = path.join(__dirname, "bin", "ffmpeg");
-try {
-    // Set the executable flag on Render (Linux)
-    execSync(`chmod +x ${ffmpegPath}`);
-    console.log("Permissions updated for ffmpeg.");
-} catch (err) {
-    console.error("Failed to set permissions for ffmpeg:", err);
-}
-    const command = `${ffmpegPath} -i "${hlsUrl}" -c copy -bsf:a aac_adtstoasc "${outputPath}"`;
 
-    exec(command, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Error: ${stderr}`);
-            return res.status(500).send("Failed to process the HLS link.");
-        }
 
-        // Send the file as a download
-        res.download(outputPath, "video.mp4", (err) => {
-            if (err) {
-                console.error(err);
-            }
 
-            // Clean up the file after sending
-            fs.unlinkSync(outputPath);
-        });
-    });
-});
 
 // Start the server
 app.listen(PORT, () => {
