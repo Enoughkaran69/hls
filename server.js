@@ -3,6 +3,8 @@ const path = require("path");
 const fs = require("fs");
 const { exec } = require("child_process");
 const WebSocket = require("ws");
+const https = require("https");
+const url = require("url");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -61,60 +63,97 @@ app.post("/downloadStream", (req, res) => {
         return res.status(400).send("HLS URL and stream index are required.");
     }
 
-    // Create a unique file path for saving the video
-    const outputPath = path.join(downloadsDir, `output_${Date.now()}.mp4`);
-
-    // ffmpeg command to download the selected stream (video/audio)
-    const command = `ffmpeg -i "${hlsUrl}" -map 0:v:${streamIndex} -map 0:a:${streamIndex} -c copy "${outputPath}"`;
-
-    // Track progress
-    let progressOutput = "";
-    const ffmpegProcess = exec(command);
-
-    // Capture ffmpeg output for progress tracking
-    ffmpegProcess.stdout.on("data", (data) => {
-        progressOutput += data.toString();
-        const match = progressOutput.match(/time=(\d+:\d+:\d+\.\d+)/);
-        if (match) {
-            const time = match[1];
-            console.log(`Progress: ${time}`);
+    checkUrlExists(hlsUrl, (exists) => {
+        if (!exists) {
+            return res.status(404).send("HLS URL is not reachable.");
         }
-    });
 
-    ffmpegProcess.stderr.on("data", (data) => {
-        console.error(`stderr: ${data}`);
-    });
+        // Create a unique file path for saving the video
+        const outputPath = path.join(downloadsDir, `output_${Date.now()}.mp4`);
 
-    ffmpegProcess.on("close", (code) => {
-        if (code === 0) {
-            console.log("Download complete!");
-            res.download(outputPath, `stream_${streamIndex + 1}.mp4`, (err) => {
-                if (err) {
-                    console.error(err);
-                }
-                // Clean up the file after sending
-                fs.unlinkSync(outputPath);
-            });
-        } else {
-            console.error(`ffmpeg process exited with code ${code}`);
-            res.status(500).send("Failed to process the HLS link.");
-        }
+        // ffmpeg command to download the selected stream (video/audio)
+        const command = `ffmpeg -i "${hlsUrl}" -map 0:v:${streamIndex} -c copy "${outputPath}"`; // For video only
+
+        // Track progress
+        let progressOutput = "";
+        const ffmpegProcess = exec(command);
+
+        // Capture ffmpeg output for progress tracking
+        ffmpegProcess.stdout.on("data", (data) => {
+            progressOutput += data.toString();
+            const match = progressOutput.match(/time=(\d+:\d+:\d+\.\d+)/);
+            if (match) {
+                const time = match[1];
+                console.log(`Progress: ${time}`);
+                // Send progress to WebSocket clients
+                wss.clients.forEach((client) => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify({ progress: time }));
+                    }
+                });
+            }
+        });
+
+        ffmpegProcess.stderr.on("data", (data) => {
+            console.error(`stderr: ${data}`);
+        });
+
+        ffmpegProcess.on("close", (code) => {
+            if (code === 0) {
+                console.log("Download complete!");
+                res.download(outputPath, `stream_${streamIndex + 1}.mp4`, (err) => {
+                    if (err) {
+                        console.error(err);
+                    }
+                    // Clean up the file after sending
+                    fs.unlinkSync(outputPath);
+                });
+            } else {
+                console.error(`ffmpeg process exited with code ${code}`);
+                res.status(500).send("Failed to process the HLS link.");
+            }
+        });
     });
 });
 
 // Helper function to extract stream info from ffmpeg output
 function parseFFMpegStreams(stderr) {
     const streamDetails = [];
-    const regex = /Stream #\d+:(\d+)[^:]*: Video: (.*), (\d+)x(\d+)/g;
+    const videoRegex = /Stream #\d+:(\d+)[^:]*: Video: (.*), (\d+)x(\d+)/g;
+    const audioRegex = /Stream #\d+:(\d+)[^:]*: Audio: (.*), (\d+) Hz/g;
+
     let match;
-    while ((match = regex.exec(stderr)) !== null) {
+    // Parse video streams
+    while ((match = videoRegex.exec(stderr)) !== null) {
         streamDetails.push({
             type: "video",
             resolution: `${match[3]}x${match[4]}`,
             codec: match[2],
         });
     }
+
+    // Parse audio streams
+    while ((match = audioRegex.exec(stderr)) !== null) {
+        streamDetails.push({
+            type: "audio",
+            codec: match[2],
+            sampleRate: match[3],
+        });
+    }
+
     return streamDetails;
+}
+
+// Helper function to check if URL exists
+function checkUrlExists(hlsUrl, callback) {
+    const parsedUrl = url.parse(hlsUrl);
+    https.get({ host: parsedUrl.host, path: parsedUrl.path }, (response) => {
+        if (response.statusCode === 200) {
+            callback(true);
+        } else {
+            callback(false);
+        }
+    }).on('error', () => callback(false));
 }
 
 // WebSocket server listens on the same port as the HTTP server
