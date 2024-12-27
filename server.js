@@ -27,7 +27,9 @@ app.post("/download", (req, res) => {
     const outputPath = path.join(downloadsDir, `output_${Date.now()}.mp4`);
 
     // ffmpeg command to download and merge HLS
-    const command = `ffmpeg -i "${hlsUrl}" -c copy -bsf:a aac_adtstoasc "${outputPath}"`;
+const ffmpegPath = path.join(__dirname, "bin", "ffmpeg");
+const command = `${ffmpegPath} -i "${hlsUrl}" -c copy -bsf:a aac_adtstoasc "${outputPath}"`;
+
 
     exec(command, (error, stdout, stderr) => {
         if (error) {
