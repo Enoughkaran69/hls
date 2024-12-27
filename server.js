@@ -40,6 +40,34 @@ app.get("/", (req, res) => {
         </form>
     `);
 });
+const { exec } = require("child_process");
+
+app.post("/download", (req, res) => {
+    const { hlsUrl } = req.body;
+
+    if (!hlsUrl) {
+        return res.status(400).send("HLS URL is required.");
+    }
+
+    const outputPath = path.join(downloadsDir, `output_${Date.now()}.mp4`);
+
+    const command = `ffmpeg -i "${hlsUrl}" -c copy -bsf:a aac_adtstoasc "${outputPath}"`;
+
+    exec(command, (error, stdout, stderr) => {
+        if (error) {
+            console.error(`Error: ${stderr}`);
+            return res.status(500).send("Failed to process the HLS link.");
+        }
+
+        res.download(outputPath, "video.mp4", (err) => {
+            if (err) {
+                console.error(err);
+            }
+
+            fs.unlinkSync(outputPath);
+        });
+    });
+});
 
 
 
