@@ -1,17 +1,14 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
-const { exec } = require("child_process");
+const { spawn, exec } = require("child_process");
 const WebSocket = require("ws");
-const https = require("https");
 const http = require("http");
 const url = require("url");
 const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Create HTTP server separately for better WebSocket handling
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
@@ -20,106 +17,90 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Constants and configurations
 const DOWNLOADS_DIR = path.join(__dirname, "downloads");
-const MAX_DOWNLOAD_SIZE = 1024 * 1024 * 1024; // 1GB limit
-const ALLOWED_FORMATS = ['.m3u8', '.ts'];
-const DOWNLOAD_TIMEOUT = 30 * 60 * 1000; // 30 minutes
-
-// Ensure downloads directory exists
 if (!fs.existsSync(DOWNLOADS_DIR)) {
     fs.mkdirSync(DOWNLOADS_DIR);
 }
 
-// Rate limiting setup
-const downloadRequests = new Map();
-const RATE_LIMIT = {
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10 // limit each IP to 10 requests per windowMs
-};
+function parseFFProbeOutput(stderr) {
+    const streams = [];
+    let currentStream = null;
+    const lines = stderr.split('\n');
 
-// WebSocket connection handler
-wss.on('connection', (ws, req) => {
-    const clientIP = req.socket.remoteAddress;
-    console.log(`Client connected from ${clientIP}`);
-    
-    ws.on('close', () => {
-        console.log(`Client disconnected from ${clientIP}`);
-    });
+    for (const line of lines) {
+        if (line.includes('Stream #')) {
+            if (currentStream) {
+                streams.push(currentStream);
+            }
+            currentStream = { index: 0, type: '', codec: '', details: {} };
+            
+            // Extract stream index
+            const indexMatch = line.match(/Stream #0:(\d+)/);
+            if (indexMatch) {
+                currentStream.index = parseInt(indexMatch[1]);
+            }
 
-    ws.on('error', (error) => {
-        console.error(`WebSocket error for ${clientIP}:`, error);
-    });
-});
-
-// Utility Functions
-function sanitizeUrl(inputUrl) {
-    try {
-        const parsed = new URL(inputUrl);
-        // Only allow HTTP and HTTPS protocols
-        if (!['http:', 'https:'].includes(parsed.protocol)) {
-            return null;
+            // Determine stream type and basic info
+            if (line.includes('Video:')) {
+                currentStream.type = 'video';
+                // Extract video codec
+                const codecMatch = line.match(/Video: ([^,]+)/);
+                if (codecMatch) {
+                    currentStream.codec = codecMatch[1].trim();
+                }
+                // Extract resolution
+                const resMatch = line.match(/(\d+x\d+)/);
+                if (resMatch) {
+                    currentStream.details.resolution = resMatch[1];
+                }
+                // Extract bitrate
+                const bitrateMatch = line.match(/(\d+) kb\/s/);
+                if (bitrateMatch) {
+                    currentStream.details.bitrate = `${bitrateMatch[1]} kb/s`;
+                }
+                // Extract FPS
+                const fpsMatch = line.match(/(\d+(?:\.\d+)?) fps/);
+                if (fpsMatch) {
+                    currentStream.details.fps = `${fpsMatch[1]} fps`;
+                }
+            } else if (line.includes('Audio:')) {
+                currentStream.type = 'audio';
+                // Extract audio codec
+                const codecMatch = line.match(/Audio: ([^,]+)/);
+                if (codecMatch) {
+                    currentStream.codec = codecMatch[1].trim();
+                }
+                // Extract sample rate
+                const sampleMatch = line.match(/(\d+) Hz/);
+                if (sampleMatch) {
+                    currentStream.details.sampleRate = `${sampleMatch[1]} Hz`;
+                }
+                // Extract channels
+                const channelMatch = line.match(/stereo|mono|(\d+) channels/i);
+                if (channelMatch) {
+                    currentStream.details.channels = channelMatch[0];
+                }
+                // Extract language if available
+                const langMatch = line.match(/\(([a-z]{2,3})\)/i);
+                if (langMatch) {
+                    currentStream.details.language = langMatch[1];
+                }
+                // Extract bitrate
+                const bitrateMatch = line.match(/(\d+) kb\/s/);
+                if (bitrateMatch) {
+                    currentStream.details.bitrate = `${bitrateMatch[1]} kb/s`;
+                }
+            }
         }
-        return parsed.toString();
-    } catch (e) {
-        return null;
     }
-}
-
-function isValidStreamFormat(hlsUrl) {
-    const ext = path.extname(url.parse(hlsUrl).pathname).toLowerCase();
-    return ALLOWED_FORMATS.includes(ext);
-}
-
-async function checkUrlExists(hlsUrl) {
-    const parsedUrl = url.parse(hlsUrl);
-    const protocol = parsedUrl.protocol === 'https:' ? https : http;
-
-    return new Promise((resolve) => {
-        const req = protocol.get(hlsUrl, (response) => {
-            resolve(response.statusCode === 200);
-        });
-
-        req.on('error', () => resolve(false));
-        req.setTimeout(5000, () => {
-            req.destroy();
-            resolve(false);
-        });
-    });
-}
-
-function parseFFMpegStreams(stderr) {
-    const streamDetails = [];
-    const patterns = {
-        video: /Stream #\d+:(\d+)(?:\[0x[0-9a-f]+\])?[^\n]*: Video: ([^\s,]+)(?:.*?(\d+)x(\d+))?.*?(?:(\d+(?:\.\d+)?) fps)?/g,
-        audio: /Stream #\d+:(\d+)(?:\[0x[0-9a-f]+\])?[^\n]*: Audio: ([^\s,]+).*?(\d+) Hz.*?(?:(\d+) kb\/s)?/g
-    };
-
-    let match;
-    while ((match = patterns.video.exec(stderr)) !== null) {
-        streamDetails.push({
-            index: parseInt(match[1]),
-            type: "video",
-            codec: match[2],
-            resolution: match[3] && match[4] ? `${match[3]}x${match[4]}` : "N/A",
-            fps: match[5] || "N/A"
-        });
+    
+    if (currentStream) {
+        streams.push(currentStream);
     }
 
-    while ((match = patterns.audio.exec(stderr)) !== null) {
-        streamDetails.push({
-            index: parseInt(match[1]),
-            type: "audio",
-            codec: match[2],
-            sampleRate: `${match[3]} Hz`,
-            bitrate: match[4] ? `${match[4]} kb/s` : "N/A"
-        });
-    }
-
-    return streamDetails;
+    return streams;
 }
 
-// Request Handlers
 app.post("/getStreams", async (req, res) => {
     try {
         const { hlsUrl } = req.body;
@@ -128,27 +109,16 @@ app.post("/getStreams", async (req, res) => {
             return res.status(400).json({ error: "HLS URL is required" });
         }
 
-        const sanitizedUrl = sanitizeUrl(hlsUrl);
-        if (!sanitizedUrl) {
-            return res.status(400).json({ error: "Invalid URL format" });
-        }
-
-        if (!isValidStreamFormat(sanitizedUrl)) {
-            return res.status(400).json({ error: "Invalid stream format" });
-        }
-
-        const exists = await checkUrlExists(sanitizedUrl);
-        if (!exists) {
-            return res.status(404).json({ error: "Stream not accessible" });
-        }
-
-        const command = `ffmpeg -i "${sanitizedUrl}"`;
+        // Use ffprobe to get detailed stream information
+        const command = `ffprobe -v error -show_entries stream=codec_name,codec_type -show_entries stream_tags=language -of json "${hlsUrl}"`;
+        
         exec(command, (error, stdout, stderr) => {
-            if (error && !stderr) {
+            if (error) {
+                console.error("FFprobe error:", error);
                 return res.status(500).json({ error: "Failed to analyze stream" });
             }
 
-            const streams = parseFFMpegStreams(stderr);
+            const streams = parseFFProbeOutput(stderr);
             res.json({ streams });
         });
     } catch (error) {
@@ -159,68 +129,73 @@ app.post("/getStreams", async (req, res) => {
 
 app.post("/downloadStream", async (req, res) => {
     try {
-        const { hlsUrl, streamIndex } = req.body;
-        const clientIP = req.ip;
-
-        // Rate limiting check
-        if (downloadRequests.has(clientIP)) {
-            const requests = downloadRequests.get(clientIP);
-            if (requests.count >= RATE_LIMIT.max) {
-                if (Date.now() - requests.timestamp < RATE_LIMIT.windowMs) {
-                    return res.status(429).json({ error: "Too many download requests" });
-                }
-                downloadRequests.delete(clientIP);
-            }
+        const { hlsUrl, videoIndex, audioIndex, duration } = req.body;
+        
+        if (!hlsUrl) {
+            return res.status(400).json({ error: "HLS URL is required" });
         }
 
-        if (!hlsUrl || streamIndex === undefined) {
-            return res.status(400).json({ error: "URL and stream index required" });
-        }
-
-        const sanitizedUrl = sanitizeUrl(hlsUrl);
-        if (!sanitizedUrl) {
-            return res.status(400).json({ error: "Invalid URL format" });
-        }
-
-        const exists = await checkUrlExists(sanitizedUrl);
-        if (!exists) {
-            return res.status(404).json({ error: "Stream not accessible" });
-        }
-
-        // Create unique filename with random component
         const uniqueId = crypto.randomBytes(8).toString('hex');
         const outputPath = path.join(DOWNLOADS_DIR, `stream_${uniqueId}.mp4`);
 
-        const ffmpegCommand = `ffmpeg -i "${sanitizedUrl}" -map 0:${streamIndex} -c copy -y "${outputPath}"`;
-        
-        const ffmpegProcess = exec(ffmpegCommand);
-        let duration = null;
-        let progress = 0;
+        // Build ffmpeg command based on selected streams
+        let ffmpegCommand = ['ffmpeg', '-i', hlsUrl];
 
-        // Set download timeout
-        const timeoutId = setTimeout(() => {
-            ffmpegProcess.kill();
-            fs.unlink(outputPath, () => {});
-            return res.status(408).json({ error: "Download timeout" });
-        }, DOWNLOAD_TIMEOUT);
+        // Add video stream mapping if specified
+        if (videoIndex !== undefined) {
+            ffmpegCommand.push('-map', `0:${videoIndex}`);
+        }
 
-        ffmpegProcess.stderr.on("data", (data) => {
+        // Add audio stream mapping if specified
+        if (audioIndex !== undefined) {
+            ffmpegCommand.push('-map', `0:${audioIndex}`);
+        }
+
+        // Add duration limit if specified
+        if (duration) {
+            ffmpegCommand.push('-t', duration.toString());
+        }
+
+        // Add output options
+        ffmpegCommand.push('-c', 'copy', outputPath);
+
+        const ffmpegProcess = spawn(ffmpegCommand[0], ffmpegCommand.slice(1));
+
+        let totalDuration = null;
+        let progressTime = 0;
+
+        ffmpegProcess.stderr.on('data', (data) => {
+            const output = data.toString();
+
             // Extract duration if not already found
-            if (!duration) {
-                const durationMatch = data.toString().match(/Duration: (\d{2}:\d{2}:\d{2}\.\d{2})/);
+            if (!totalDuration) {
+                const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2}.\d{2})/);
                 if (durationMatch) {
-                    duration = durationMatch[1];
+                    const [, hours, minutes, seconds] = durationMatch;
+                    totalDuration = (parseFloat(hours) * 3600) +
+                                  (parseFloat(minutes) * 60) +
+                                  parseFloat(seconds);
                 }
             }
 
-            // Extract progress
-            const timeMatch = data.toString().match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
-            if (timeMatch && duration) {
-                progress = calculateProgress(timeMatch[1], duration);
+            // Extract current time
+            const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2}.\d{2})/);
+            if (timeMatch && totalDuration) {
+                const [, hours, minutes, seconds] = timeMatch;
+                progressTime = (parseFloat(hours) * 3600) +
+                             (parseFloat(minutes) * 60) +
+                             parseFloat(seconds);
+                
+                const progress = Math.min((progressTime / totalDuration) * 100, 100);
+                
+                // Send progress through WebSocket
                 wss.clients.forEach(client => {
                     if (client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify({ 
-                            progress,
+                        client.send(JSON.stringify({
+                            type: 'progress',
+                            progress: Math.round(progress),
+                            currentTime: progressTime,
+                            totalTime: totalDuration,
                             filename: path.basename(outputPath)
                         }));
                     }
@@ -228,25 +203,15 @@ app.post("/downloadStream", async (req, res) => {
             }
         });
 
-        ffmpegProcess.on("close", (code) => {
-            clearTimeout(timeoutId);
-
+        ffmpegProcess.on('close', (code) => {
             if (code === 0) {
-                res.download(outputPath, `stream_${streamIndex}.mp4`, (err) => {
+                res.download(outputPath, `download.mp4`, (err) => {
                     if (err) {
                         console.error("Download error:", err);
                     }
+                    // Clean up the file after sending
                     fs.unlink(outputPath, () => {});
                 });
-
-                // Update rate limiting
-                const now = Date.now();
-                if (downloadRequests.has(clientIP)) {
-                    const requests = downloadRequests.get(clientIP);
-                    requests.count++;
-                } else {
-                    downloadRequests.set(clientIP, { count: 1, timestamp: now });
-                }
             } else {
                 res.status(500).json({ error: "Download failed" });
                 fs.unlink(outputPath, () => {});
@@ -259,33 +224,6 @@ app.post("/downloadStream", async (req, res) => {
     }
 });
 
-// Helper function to calculate progress percentage
-function calculateProgress(currentTime, totalDuration) {
-    const timeToSeconds = (timeString) => {
-        const [hours, minutes, seconds] = timeString.split(':').map(parseFloat);
-        return hours * 3600 + minutes * 60 + seconds;
-    };
-
-    const current = timeToSeconds(currentTime);
-    const total = timeToSeconds(totalDuration);
-    return Math.round((current / total) * 100);
-}
-
-// Start server
 server.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);
-});
-
-// Cleanup on server shutdown
-process.on('SIGTERM', () => {
-    server.close(() => {
-        console.log('Server shutdown complete');
-        // Clean up downloads directory
-        fs.readdir(DOWNLOADS_DIR, (err, files) => {
-            if (err) return;
-            files.forEach(file => {
-                fs.unlink(path.join(DOWNLOADS_DIR, file), () => {});
-            });
-        });
-    });
 });
