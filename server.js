@@ -1,10 +1,9 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
-const { spawn, exec } = require("child_process");
+const { exec } = require("child_process");
 const WebSocket = require("ws");
 const http = require("http");
-const url = require("url");
 const crypto = require("crypto");
 
 const app = express();
@@ -16,11 +15,6 @@ const wss = new WebSocket.Server({ server });
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-const DOWNLOADS_DIR = path.join(__dirname, "downloads");
-if (!fs.existsSync(DOWNLOADS_DIR)) {
-    fs.mkdirSync(DOWNLOADS_DIR);
-}
 
 const parseFFMpegStreams = (stderr) => {
     const streamDetails = [];
@@ -85,103 +79,6 @@ app.post("/getStreams", (req, res) => {
         console.log('Sending stream information to client:', streams);
         res.json({ streams });
     });
-});
-
-app.post("/downloadStream", async (req, res) => {
-    try {
-        const { hlsUrl, videoIndex, audioIndex, duration } = req.body;
-        
-        if (!hlsUrl) {
-            return res.status(400).json({ error: "HLS URL is required" });
-        }
-
-        const uniqueId = crypto.randomBytes(8).toString('hex');
-        const outputPath = path.join(DOWNLOADS_DIR, `stream_${uniqueId}.mp4`);
-
-        // Build ffmpeg command based on selected streams
-        let ffmpegCommand = ['ffmpeg', '-i', hlsUrl];
-
-        // Add video stream mapping if specified
-        if (videoIndex !== undefined) {
-            ffmpegCommand.push('-map', `0:${videoIndex}`);
-        }
-
-        // Add audio stream mapping if specified
-        if (audioIndex !== undefined) {
-            ffmpegCommand.push('-map', `0:${audioIndex}`);
-        }
-
-        // Add duration limit if specified
-        if (duration) {
-            ffmpegCommand.push('-t', duration.toString());
-        }
-
-        // Add output options
-        ffmpegCommand.push('-c', 'copy', outputPath);
-
-        const ffmpegProcess = spawn(ffmpegCommand[0], ffmpegCommand.slice(1));
-
-        let totalDuration = null;
-        let progressTime = 0;
-
-        ffmpegProcess.stderr.on('data', (data) => {
-            const output = data.toString();
-
-            // Extract duration if not already found
-            if (!totalDuration) {
-                const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2}.\d{2})/);
-                if (durationMatch) {
-                    const [, hours, minutes, seconds] = durationMatch;
-                    totalDuration = (parseFloat(hours) * 3600) +
-                                  (parseFloat(minutes) * 60) +
-                                  parseFloat(seconds);
-                }
-            }
-
-            // Extract current time
-            const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2}.\d{2})/);
-            if (timeMatch && totalDuration) {
-                const [, hours, minutes, seconds] = timeMatch;
-                progressTime = (parseFloat(hours) * 3600) +
-                             (parseFloat(minutes) * 60) +
-                             parseFloat(seconds);
-                
-                const progress = Math.min((progressTime / totalDuration) * 100, 100);
-                
-                // Send progress through WebSocket
-                wss.clients.forEach(client => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify({
-                            type: 'progress',
-                            progress: Math.round(progress),
-                            currentTime: progressTime,
-                            totalTime: totalDuration,
-                            filename: path.basename(outputPath)
-                        }));
-                    }
-                });
-            }
-        });
-
-        ffmpegProcess.on('close', (code) => {
-            if (code === 0) {
-                res.download(outputPath, `download.mp4`, (err) => {
-                    if (err) {
-                        console.error("Download error:", err);
-                    }
-                    // Clean up the file after sending
-                    fs.unlink(outputPath, () => {});
-                });
-            } else {
-                res.status(500).json({ error: "Download failed" });
-                fs.unlink(outputPath, () => {});
-            }
-        });
-
-    } catch (error) {
-        console.error("Download error:", error);
-        res.status(500).json({ error: "Internal server error" });
-    }
 });
 
 server.listen(PORT, () => {
