@@ -22,109 +22,69 @@ if (!fs.existsSync(DOWNLOADS_DIR)) {
     fs.mkdirSync(DOWNLOADS_DIR);
 }
 
-function parseFFProbeOutput(stderr) {
-    const streams = [];
-    let currentStream = null;
-    const lines = stderr.split('\n');
+const parseFFMpegStreams = (stderr) => {
+    const streamDetails = [];
+    // Enhanced regex patterns for better stream detection
+    const videoPattern = /Stream #(\d+):(\d+)(?:\[0x[0-9a-f]+\])?[^\n]*: Video: ([^\s,]+)(?:.*?(\d+x\d+))?.*?(?:(\d+(?:\.\d+)?) fps)?.*?(?:(\d+) kb\/s)?/gi;
+    const audioPattern = /Stream #(\d+):(\d+)(?:\[0x[0-9a-f]+\])?[^\n]*: Audio: ([^\s,]+).*?, ([^,]+)(?:.*?(\d+) Hz)?.*?(?:(\d+) kb\/s)?(?:.*?\[(.*?)\])?/gi;
 
-    for (const line of lines) {
-        if (line.includes('Stream #')) {
-            if (currentStream) {
-                streams.push(currentStream);
-            }
-            currentStream = { index: 0, type: '', codec: '', details: {} };
-            
-            // Extract stream index
-            const indexMatch = line.match(/Stream #0:(\d+)/);
-            if (indexMatch) {
-                currentStream.index = parseInt(indexMatch[1]);
-            }
-
-            // Determine stream type and basic info
-            if (line.includes('Video:')) {
-                currentStream.type = 'video';
-                // Extract video codec
-                const codecMatch = line.match(/Video: ([^,]+)/);
-                if (codecMatch) {
-                    currentStream.codec = codecMatch[1].trim();
-                }
-                // Extract resolution
-                const resMatch = line.match(/(\d+x\d+)/);
-                if (resMatch) {
-                    currentStream.details.resolution = resMatch[1];
-                }
-                // Extract bitrate
-                const bitrateMatch = line.match(/(\d+) kb\/s/);
-                if (bitrateMatch) {
-                    currentStream.details.bitrate = `${bitrateMatch[1]} kb/s`;
-                }
-                // Extract FPS
-                const fpsMatch = line.match(/(\d+(?:\.\d+)?) fps/);
-                if (fpsMatch) {
-                    currentStream.details.fps = `${fpsMatch[1]} fps`;
-                }
-            } else if (line.includes('Audio:')) {
-                currentStream.type = 'audio';
-                // Extract audio codec
-                const codecMatch = line.match(/Audio: ([^,]+)/);
-                if (codecMatch) {
-                    currentStream.codec = codecMatch[1].trim();
-                }
-                // Extract sample rate
-                const sampleMatch = line.match(/(\d+) Hz/);
-                if (sampleMatch) {
-                    currentStream.details.sampleRate = `${sampleMatch[1]} Hz`;
-                }
-                // Extract channels
-                const channelMatch = line.match(/stereo|mono|(\d+) channels/i);
-                if (channelMatch) {
-                    currentStream.details.channels = channelMatch[0];
-                }
-                // Extract language if available
-                const langMatch = line.match(/\(([a-z]{2,3})\)/i);
-                if (langMatch) {
-                    currentStream.details.language = langMatch[1];
-                }
-                // Extract bitrate
-                const bitrateMatch = line.match(/(\d+) kb\/s/);
-                if (bitrateMatch) {
-                    currentStream.details.bitrate = `${bitrateMatch[1]} kb/s`;
-                }
-            }
-        }
-    }
-    
-    if (currentStream) {
-        streams.push(currentStream);
-    }
-
-    return streams;
-}
-
-app.post("/getStreams", async (req, res) => {
-    try {
-        const { hlsUrl } = req.body;
-        
-        if (!hlsUrl) {
-            return res.status(400).json({ error: "HLS URL is required" });
-        }
-
-        // Use ffprobe to get detailed stream information
-        const command = `ffprobe -v error -show_entries stream=codec_name,codec_type -show_entries stream_tags=language -of json "${hlsUrl}"`;
-        
-        exec(command, (error, stdout, stderr) => {
-            if (error) {
-                console.error("FFprobe error:", error);
-                return res.status(500).json({ error: "Failed to analyze stream" });
-            }
-
-            const streams = parseFFProbeOutput(stderr);
-            res.json({ streams });
+    // Parse video streams
+    let match;
+    while ((match = videoPattern.exec(stderr)) !== null) {
+        const [_, streamNum, index, codec, resolution, fps, bitrate] = match;
+        streamDetails.push({
+            index: parseInt(index),
+            type: 'video',
+            codec: codec,
+            resolution: resolution || 'N/A',
+            fps: fps || 'N/A',
+            bitrate: bitrate ? `${bitrate} kb/s` : 'N/A',
+            streamIndex: `${streamNum}:${index}`
         });
-    } catch (error) {
-        console.error("Stream analysis error:", error);
-        res.status(500).json({ error: "Internal server error" });
     }
+
+    // Parse audio streams
+    while ((match = audioPattern.exec(stderr)) !== null) {
+        const [_, streamNum, index, codec, layout, sampleRate, bitrate, language] = match;
+        streamDetails.push({
+            index: parseInt(index),
+            type: 'audio',
+            codec: codec,
+            layout: layout,
+            sampleRate: sampleRate ? `${sampleRate} Hz` : 'N/A',
+            bitrate: bitrate ? `${bitrate} kb/s` : 'N/A',
+            language: language || 'und',
+            streamIndex: `${streamNum}:${index}`
+        });
+    }
+
+    // Log the detected streams for debugging
+    console.log('Detected streams:', JSON.stringify(streamDetails, null, 2));
+
+    return streamDetails;
+};
+
+// Modify the getStreams endpoint to include more information
+app.post("/getStreams", (req, res) => {
+    const { hlsUrl } = req.body;
+
+    if (!hlsUrl) {
+        return res.status(400).send("HLS URL is required.");
+    }
+
+    // Use ffprobe instead of ffmpeg for better stream information
+    const command = `ffprobe -v error -show_entries stream=index,codec_name,codec_type,width,height,sample_rate,channels,channel_layout -of json "${hlsUrl}"`;
+
+    exec(command, (error, stdout, stderr) => {
+        if (error && !stderr) {
+            console.error(`exec error: ${error}`);
+            return res.status(500).send("Failed to fetch stream information.");
+        }
+
+        const streams = parseFFMpegStreams(stderr);
+        console.log('Sending stream information to client:', streams);
+        res.json({ streams });
+    });
 });
 
 app.post("/downloadStream", async (req, res) => {
