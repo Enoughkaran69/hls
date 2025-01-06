@@ -342,7 +342,7 @@
                 const response = await fetch("/getStreams", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ hlsUrl: url })
+                    body: JSON.stringify({ hlsUrl: hlsUrl })
                 });
 
                 if (!response.ok) {
