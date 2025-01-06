@@ -1,103 +1,74 @@
 const express = require("express");
 const path = require("path");
-const fs = require("fs");
-const { spawn } = require("child_process");
+const { exec } = require("child_process");
 const WebSocket = require("ws");
-const http = require("http");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
 
-// Middleware setup
-app.use(express.static(path.join(__dirname, 'public')));
+// WebSocket Server
+const wss = new WebSocket.Server({ noServer: true });
+
+// Serve static files from 'public' directory
+app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-const parseFFMpegStreams = (stderr) => {
-    const streamDetails = [];
-    // Enhanced regex patterns for better stream detection
-    const videoPattern = /Stream #(\d+):(\d+)(?:\[0x[0-9a-f]+\])?[^\n]*: Video: ([^\s,]+)(?:.*?(\d+x\d+))?.*?(?:(\d+(?:\.\d+)?) fps)?.*?(?:(\d+) kb\/s)?/gi;
-    const audioPattern = /Stream #(\d+):(\d+)(?:\[0x[0-9a-f]+\])?[^\n]*: Audio: ([^\s,]+).*?, ([^,]+)(?:.*?(\d+) Hz)?.*?(?:(\d+) kb\/s)?(?:.*?\[(.*?)\])?/gi;
+// WebSocket setup
+wss.on("connection", (ws) => {
+    console.log("Client connected to WebSocket");
+    ws.on("close", () => {
+        console.log("Client disconnected");
+    });
+});
 
-    // Parse video streams
-    let match;
-    while ((match = videoPattern.exec(stderr)) !== null) {
-        const [_, streamNum, index, codec, resolution, fps, bitrate] = match;
-        streamDetails.push({
-            index: parseInt(index),
-            type: 'video',
-            codec: codec,
-            resolution: resolution || 'N/A',
-            fps: fps || 'N/A',
-            bitrate: bitrate ? `${bitrate} kb/s` : 'N/A',
-            streamIndex: `${streamNum}:${index}`
-        });
-    }
-
-    // Parse audio streams
-    while ((match = audioPattern.exec(stderr)) !== null) {
-        const [_, streamNum, index, codec, layout, sampleRate, bitrate, language] = match;
-        streamDetails.push({
-            index: parseInt(index),
-            type: 'audio',
-            codec: codec,
-            layout: layout,
-            sampleRate: sampleRate ? `${sampleRate} Hz` : 'N/A',
-            bitrate: bitrate ? `${bitrate} kb/s` : 'N/A',
-            language: language || 'und',
-            streamIndex: `${streamNum}:${index}`
-        });
-    }
-
-    // Log the detected streams for debugging
-    console.log('Detected streams:', JSON.stringify(streamDetails, null, 2));
-
-    return streamDetails;
-};
-
-// Modify the getStreams endpoint to include more information
+// API to fetch stream information
 app.post("/getStreams", (req, res) => {
     const { hlsUrl } = req.body;
+    if (!hlsUrl) return res.status(400).send("HLS URL is required.");
 
-    if (!hlsUrl) {
-        return res.status(400).send("HLS URL is required.");
-    }
-
-    // Fetch the HLS playlist content (m3u8 file)
-    exec(`curl -s "${hlsUrl}"`, (error, stdout, stderr) => {
+    const command = `ffmpeg -i "${hlsUrl}"`;
+    exec(command, (error, stdout, stderr) => {
         if (error) {
-            console.error(`Error fetching HLS playlist: ${stderr || error.message}`);
-            return res.status(500).send("Failed to fetch HLS playlist.");
+            console.error(`Error fetching streams: ${error}`);
+            return res.status(500).send("Failed to fetch stream information.");
         }
 
-        // Parse the HLS playlist to find stream information
-        const streams = parseHLSPlaylist(stdout);
-        
-        // Send the parsed stream data to the client
+        const streams = parseStreams(stderr);
         res.json({ streams });
     });
 });
 
-// Function to parse the HLS playlist and extract stream info
-const parseHLSPlaylist = (playlistContent) => {
-    const streamDetails = [];
-    const streamPattern = /#EXT-X-STREAM-INF:BANDWIDTH=(\d+),RESOLUTION=(\d+x\d+).*?\n([^#]+)/gi;
+// Parse ffmpeg output to extract stream information
+function parseStreams(stderr) {
+    const streams = [];
+    const videoRegex = /Stream #\d+:(\d+).*Video: (\w+),.* (\d+)x(\d+)/g;
+    const audioRegex = /Stream #\d+:(\d+).*Audio: (\w+), (\d+) Hz/g;
 
     let match;
-    while ((match = streamPattern.exec(playlistContent)) !== null) {
-        const [_, bandwidth, resolution, url] = match;
-        streamDetails.push({
-            bandwidth: parseInt(bandwidth),
-            resolution: resolution,
-            url: url.trim()
+    while ((match = videoRegex.exec(stderr)) !== null) {
+        streams.push({
+            type: "video",
+            index: match[1],
+            codec: match[2],
+            resolution: `${match[3]}x${match[4]}`
+        });
+    }
+    while ((match = audioRegex.exec(stderr)) !== null) {
+        streams.push({
+            type: "audio",
+            index: match[1],
+            codec: match[2],
+            sampleRate: match[3]
         });
     }
 
-    return streamDetails;
-};
+    return streams;
+}
 
-server.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+// WebSocket upgrade
+app.server = app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+app.server.on("upgrade", (req, socket, head) => {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+    });
 });
