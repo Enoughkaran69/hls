@@ -3,94 +3,311 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live HLS Stream Player</title>
+    <title>HLS Stream Downloader</title>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --error-color: #dc2626;
+            --success-color: #16a34a;
+            --text-color: #1f2937;
+            --bg-color: #f3f4f6;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--primary-color);
+            margin-bottom: 30px;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #1d4ed8;
+        }
+
+        button:disabled {
+            background-color: #93c5fd;
+            cursor: not-allowed;
+        }
+
+        #player-container {
+            margin: 20px 0;
+            background: black;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        video {
+            width: 100%;
+            max-height: 600px;
+            display: block;
+        }
+
+        #streamDetails {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .stream-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border: 1px solid #ddd;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            background: white;
+        }
+
+        .stream-info {
+            flex: 1;
+        }
+
+        .progress-container {
+            width: 100%;
+            background-color: #ddd;
+            border-radius: 4px;
+            margin: 10px 0;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 0%;
+            height: 20px;
+            background-color: var(--primary-color);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin: 10px 0;
+            display: none;
+        }
+
+        .alert-error {
+            background-color: #fecaca;
+            color: var(--error-color);
+            border: 1px solid #f87171;
+        }
+
+        .alert-success {
+            background-color: #bbf7d0;
+            color: var(--success-color);
+            border: 1px solid #86efac;
+        }
+    </style>
 </head>
 <body>
-    <h1>Live HLS Stream</h1>
+    <div class="container">
+        <h1>HLS Stream Downloader</h1>
 
-    <label for="hlsUrl">Enter HLS URL:</label>
-    <input type="text" id="hlsUrl" placeholder="Enter HLS stream URL" />
-    <button id="loadStream">Load Stream</button>
+        <div class="alert alert-error" id="errorAlert"></div>
+        <div class="alert alert-success" id="successAlert"></div>
 
-    <div id="player-container">
-        <video id="videoPlayer" controls></video>
-    </div>
+        <div class="input-group">
+            <input type="text" id="hlsUrl" placeholder="Enter HLS stream URL (e.g., https://example.com/stream.m3u8)" />
+            <button id="loadStream">Load Stream</button>
+        </div>
 
-    <div id="streamDetails">
-        <h3>Available Streams:</h3>
-        <ul id="streamList"></ul>
+        <div id="player-container">
+            <video id="videoPlayer" controls></video>
+        </div>
+
+        <div id="streamDetails">
+            <h3>Available Streams</h3>
+            <div id="streamList"></div>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script>
+        let ws;
         const loadStreamButton = document.getElementById("loadStream");
         const hlsUrlInput = document.getElementById("hlsUrl");
         const videoPlayer = document.getElementById("videoPlayer");
         const streamList = document.getElementById("streamList");
+        const errorAlert = document.getElementById("errorAlert");
+        const successAlert = document.getElementById("successAlert");
+
+        // Initialize WebSocket connection
+        function initWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}`);
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.progress !== undefined) {
+                    updateProgress(data.filename, data.progress);
+                }
+            };
+
+            ws.onerror = (error) => {
+                showError("WebSocket connection error");
+            };
+
+            ws.onclose = () => {
+                setTimeout(initWebSocket, 5000); // Reconnect after 5 seconds
+            };
+        }
+
+        function showError(message) {
+            errorAlert.textContent = message;
+            errorAlert.style.display = "block";
+            successAlert.style.display = "none";
+            setTimeout(() => {
+                errorAlert.style.display = "none";
+            }, 5000);
+        }
+
+        function showSuccess(message) {
+            successAlert.textContent = message;
+            successAlert.style.display = "block";
+            errorAlert.style.display = "none";
+            setTimeout(() => {
+                successAlert.style.display = "none";
+            }, 5000);
+        }
+
+        function updateProgress(filename, progress) {
+            const progressBar = document.querySelector(`[data-filename="${filename}"] .progress-bar`);
+            const progressContainer = document.querySelector(`[data-filename="${filename}"] .progress-container`);
+            
+            if (progressContainer && progressBar) {
+                progressContainer.style.display = "block";
+                progressBar.style.width = `${progress}%`;
+                
+                if (progress >= 100) {
+                    setTimeout(() => {
+                        progressContainer.style.display = "none";
+                    }, 2000);
+                }
+            }
+        }
 
         loadStreamButton.addEventListener("click", () => {
-            const hlsUrl = hlsUrlInput.value;
-            if (!hlsUrl) return alert("Please enter an HLS URL.");
+            const hlsUrl = hlsUrlInput.value.trim();
+            if (!hlsUrl) {
+                return showError("Please enter an HLS URL");
+            }
 
-            // Clear previous streams and start loading the new stream
+            loadStreamButton.disabled = true;
             streamList.innerHTML = "";
             loadHLSStream(hlsUrl);
         });
 
-        // Load HLS stream and show available streams
-        function loadHLSStream(url) {
-            fetch("/getStreams", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({ hlsUrl: url })
-            })
-            .then(response => response.json())
-            .then(data => {
-                const availableStreams = data.streams;
-                availableStreams.forEach((stream, index) => {
-                    const listItem = document.createElement("li");
-                    listItem.textContent = `Stream ${index + 1}: ${stream.resolution}, ${stream.codec}`;
-
-                    const downloadButton = document.createElement("button");
-                    downloadButton.textContent = "Download";
-                    downloadButton.onclick = () => downloadStream(index);
-
-                    listItem.appendChild(downloadButton);
-                    streamList.appendChild(listItem);
+        async function loadHLSStream(url) {
+            try {
+                const response = await fetch("/getStreams", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ hlsUrl: url })
                 });
 
-                // Load the first stream into the video player
-                if (availableStreams.length > 0) {
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+
+                const data = await response.json();
+                
+                if (data.streams.length === 0) {
+                    showError("No streams found in the provided URL");
+                    return;
+                }
+
+                data.streams.forEach((stream, index) => {
+                    const streamItem = document.createElement("div");
+                    streamItem.className = "stream-item";
+                    streamItem.innerHTML = `
+                        <div class="stream-info">
+                            <strong>Stream ${index + 1}</strong>
+                            <p>Type: ${stream.type}
+                            ${stream.resolution ? `<br>Resolution: ${stream.resolution}` : ''}
+                            ${stream.codec ? `<br>Codec: ${stream.codec}` : ''}
+                            ${stream.sampleRate ? `<br>Sample Rate: ${stream.sampleRate}` : ''}</p>
+                            <div class="progress-container" data-filename="stream_${index}">
+                                <div class="progress-bar"></div>
+                            </div>
+                        </div>
+                        <button onclick="downloadStream(${index})">Download</button>
+                    `;
+                    streamList.appendChild(streamItem);
+                });
+
+                if (Hls.isSupported() && data.streams.some(s => s.type === 'video')) {
                     const hls = new Hls();
                     hls.loadSource(url);
                     hls.attachMedia(videoPlayer);
-                    videoPlayer.play();
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        videoPlayer.play().catch(e => console.log("Auto-play prevented"));
+                    });
                 }
-            })
-            .catch(error => {
-                console.error("Error loading streams:", error);
-                alert("Failed to load streams.");
-            });
+
+                showSuccess("Streams loaded successfully");
+            } catch (error) {
+                showError(error.message || "Failed to load streams");
+            } finally {
+                loadStreamButton.disabled = false;
+            }
         }
 
-        // Function to download the selected stream
-        function downloadStream(streamIndex) {
-            const hlsUrl = hlsUrlInput.value;
+        async function downloadStream(streamIndex) {
+            const hlsUrl = hlsUrlInput.value.trim();
+            const button = event.target;
+            button.disabled = true;
 
-            fetch('/downloadStream', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    hlsUrl: hlsUrl,
-                    streamIndex: streamIndex
-                })
-            })
-            .then(response => response.blob())
-            .then(blob => {
+            try {
+                const response = await fetch('/downloadStream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hlsUrl, streamIndex })
+                });
+
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+
+                const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.style.display = "none";
@@ -99,12 +316,16 @@
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
-            })
-            .catch(err => {
-                console.error("Error downloading stream:", err);
-                alert("Failed to download the stream.");
-            });
+                showSuccess("Download completed successfully");
+            } catch (error) {
+                showError(error.message || "Failed to download stream");
+            } finally {
+                button.disabled = false;
+            }
         }
+
+        // Initialize WebSocket connection when page loads
+        initWebSocket();
     </script>
 </body>
 </html>
