@@ -3,145 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stream Information</title>
+    <title>HLS Stream Info</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f9;
-            margin: 0;
-            padding: 20px;
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-        input[type="text"] {
-            width: 100%;
-            padding: 10px;
-            margin: 10px 0;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            width: 100%;
-            font-size: 16px;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        .stream-info {
-            margin-top: 20px;
-        }
-        .stream-info table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        .stream-info table, th, td {
-            border: 1px solid #ddd;
-        }
-        .stream-info th, td {
-            padding: 10px;
-            text-align: left;
-        }
-        .stream-info th {
-            background-color: #f2f2f2;
-        }
-        .error {
-            color: red;
-            text-align: center;
-        }
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #output { margin-top: 20px; }
     </style>
 </head>
 <body>
+    <h1>HLS Stream Info</h1>
+    <form id="streamForm">
+        <label for="hlsUrl">HLS URL:</label>
+        <input type="url" id="hlsUrl" placeholder="Enter HLS URL" required />
+        <button type="submit">Get Stream Info</button>
+    </form>
 
-    <h1>Stream Information</h1>
-
-    <div class="container">
-        <input type="text" id="hlsUrl" placeholder="Enter HLS URL here">
-        <button onclick="fetchStreamInfo()">Get Stream Info</button>
-
-        <div id="error" class="error"></div>
-
-        <div class="stream-info" id="streamInfo"></div>
-    </div>
+    <div id="output"></div>
 
     <script>
-        function fetchStreamInfo() {
+        const form = document.getElementById("streamForm");
+        const output = document.getElementById("output");
+
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
             const hlsUrl = document.getElementById("hlsUrl").value;
-            const errorElement = document.getElementById("error");
-            const streamInfoElement = document.getElementById("streamInfo");
 
-            // Clear previous results
-            streamInfoElement.innerHTML = '';
-            errorElement.innerHTML = '';
+            // Fetch stream info
+            try {
+                const response = await fetch("/getStreams", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ hlsUrl })
+                });
 
-            if (!hlsUrl) {
-                errorElement.innerHTML = "Please enter a valid HLS URL.";
+                if (!response.ok) throw new Error("Failed to fetch stream info");
+                const { streams } = await response.json();
+                displayStreams(streams);
+            } catch (error) {
+                output.innerHTML = `<p style="color: red;">${error.message}</p>`;
+            }
+        });
+
+        function displayStreams(streams) {
+            output.innerHTML = `<h2>Stream Information</h2>`;
+            if (streams.length === 0) {
+                output.innerHTML += `<p>No streams found.</p>`;
                 return;
             }
 
-            // Send request to the backend
-            fetch('/getStreams', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ hlsUrl })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.streams && data.streams.length > 0) {
-                    // Display stream information
-                    const table = document.createElement('table');
-                    table.innerHTML = `
-                        <thead>
-                            <tr>
-                                <th>Type</th>
-                                <th>Codec</th>
-                                <th>Resolution</th>
-                                <th>FPS</th>
-                                <th>Bitrate</th>
-                                <th>Stream Index</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${data.streams.map(stream => `
-                                <tr>
-                                    <td>${stream.type}</td>
-                                    <td>${stream.codec}</td>
-                                    <td>${stream.resolution}</td>
-                                    <td>${stream.fps}</td>
-                                    <td>${stream.bitrate}</td>
-                                    <td>${stream.streamIndex}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    `;
-                    streamInfoElement.appendChild(table);
-                } else {
-                    errorElement.innerHTML = "No streams found for the given URL.";
-                }
-            })
-            .catch(error => {
-                errorElement.innerHTML = "Error fetching stream information: " + error.message;
+            const list = document.createElement("ul");
+            streams.forEach((stream, index) => {
+                const item = document.createElement("li");
+                item.textContent = `${index + 1}. Type: ${stream.type}, Codec: ${stream.codec}, ${
+                    stream.type === "video" ? `Resolution: ${stream.resolution}` : `Sample Rate: ${stream.sampleRate} Hz`
+                }`;
+                list.appendChild(item);
             });
+            output.appendChild(list);
         }
     </script>
-
 </body>
 </html>
