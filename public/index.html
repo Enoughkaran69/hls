@@ -3,63 +3,429 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HLS Stream Info</title>
+    <title>HLS Stream Downloader</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        #output { margin-top: 20px; }
+        :root {
+            --primary-color: #2563eb;
+            --error-color: #dc2626;
+            --success-color: #16a34a;
+            --text-color: #1f2937;
+            --bg-color: #f3f4f6;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--primary-color);
+            margin-bottom: 30px;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #1d4ed8;
+        }
+
+        button:disabled {
+            background-color: #93c5fd;
+            cursor: not-allowed;
+        }
+
+        #player-container {
+            margin: 20px 0;
+            background: black;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        video {
+            width: 100%;
+            max-height: 600px;
+            display: block;
+        }
+
+        .stream-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .quality-selector {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+
+        .quality-option {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .quality-option.selected {
+            border-color: var(--primary-color);
+            background-color: #eff6ff;
+        }
+
+        .progress-container {
+            width: 100%;
+            background-color: #ddd;
+            border-radius: 4px;
+            margin: 10px 0;
+            height: 20px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            width: 0%;
+            height: 100%;
+            background-color: var(--primary-color);
+            transition: width 0.3s ease;
+            position: relative;
+        }
+
+        .progress-text {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-size: 12px;
+            line-height: 20px;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin: 10px 0;
+            display: none;
+        }
+
+        .alert-error {
+            background-color: #fecaca;
+            color: var(--error-color);
+            border: 1px solid #f87171;
+        }
+
+        .alert-success {
+            background-color: #bbf7d0;
+            color: var(--success-color);
+            border: 1px solid #86efac;
+        }
+
+        .download-options {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8fafc;
+            border-radius: 6px;
+        }
+
+        .language-tag {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            margin-right: 5px;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
-    <h1>HLS Stream Info</h1>
-    <form id="streamForm">
-        <label for="hlsUrl">HLS URL:</label>
-        <input type="url" id="hlsUrl" placeholder="Enter HLS URL" required />
-        <button type="submit">Get Stream Info</button>
-    </form>
+    <div class="container">
+        <h1>HLS Stream Downloader</h1>
 
-    <div id="output"></div>
+        <div class="alert alert-error" id="errorAlert"></div>
+        <div class="alert alert-success" id="successAlert"></div>
 
+        <div class="input-group">
+            <input type="text" id="hlsUrl" placeholder="Enter HLS stream URL (e.g., https://example.com/stream.m3u8)" />
+            <button id="loadStream">Load Stream</button>
+        </div>
+
+        <div id="player-container">
+            <video id="videoPlayer" controls></video>
+        </div>
+
+        <div class="stream-section">
+            <h3>Video Qualities</h3>
+            <div id="videoQualities" class="quality-selector"></div>
+        </div>
+
+        <div class="stream-section">
+            <h3>Audio Tracks</h3>
+            <div id="audioTracks" class="quality-selector"></div>
+        </div>
+
+        <div class="stream-section">
+            <h3>Download Options</h3>
+            <div class="download-options">
+                <div id="selectedTracks"></div>
+                <button id="downloadButton" disabled>Start Download</button>
+                <div class="progress-container" style="display: none;">
+                    <div class="progress-bar">
+                        <span class="progress-text">0%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script>
-        const form = document.getElementById("streamForm");
-        const output = document.getElementById("output");
+        let ws;
+        let selectedVideo = null;
+        let selectedAudio = null;
+        let streamInfo = null;
 
-        form.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const hlsUrl = document.getElementById("hlsUrl").value;
+        const loadStreamButton = document.getElementById("loadStream");
+        const hlsUrlInput = document.getElementById("hlsUrl");
+        const videoPlayer = document.getElementById("videoPlayer");
+        const videoQualities = document.getElementById("videoQualities");
+        const audioTracks = document.getElementById("audioTracks");
+        const downloadButton = document.getElementById("downloadButton");
+        const errorAlert = document.getElementById("errorAlert");
+        const successAlert = document.getElementById("successAlert");
+        const selectedTracks = document.getElementById("selectedTracks");
 
-            // Fetch stream info
+        function initWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}`);
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.progress !== undefined) {
+                    updateProgress(data.progress);
+                }
+            };
+
+            ws.onerror = () => showError("WebSocket connection error");
+            ws.onclose = () => setTimeout(initWebSocket, 5000);
+        }
+
+        function showError(message) {
+            errorAlert.textContent = message;
+            errorAlert.style.display = "block";
+            successAlert.style.display = "none";
+            setTimeout(() => errorAlert.style.display = "none", 5000);
+        }
+
+        function showSuccess(message) {
+            successAlert.textContent = message;
+            successAlert.style.display = "block";
+            errorAlert.style.display = "none";
+            setTimeout(() => successAlert.style.display = "none", 5000);
+        }
+
+        function updateProgress(progress) {
+            const progressContainer = document.querySelector('.progress-container');
+            const progressBar = document.querySelector('.progress-bar');
+            const progressText = document.querySelector('.progress-text');
+
+            progressContainer.style.display = 'block';
+            progressBar.style.width = `${progress}%`;
+            progressText.textContent = `${progress}%`;
+
+            if (progress >= 100) {
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    progressBar.style.width = '0%';
+                }, 2000);
+            }
+        }
+
+        function updateSelectedTracks() {
+            let html = '<p><strong>Selected tracks:</strong><br>';
+            if (selectedVideo) {
+                html += `Video: ${selectedVideo.resolution} (${selectedVideo.codec})<br>`;
+            }
+            if (selectedAudio) {
+                html += `Audio: ${selectedAudio.language || 'Default'} - ${selectedAudio.codec} ${selectedAudio.sampleRate}`;
+            }
+            html += '</p>';
+            selectedTracks.innerHTML = html;
+            downloadButton.disabled = !(selectedVideo && selectedAudio);
+        }
+
+        function createQualityOption(stream, type) {
+            const div = document.createElement('div');
+            div.className = 'quality-option';
+            
+            let details = '';
+            if (type === 'video') {
+                details = `
+                    <strong>${stream.resolution}</strong><br>
+                    Codec: ${stream.codec}<br>
+                    ${stream.fps ? `FPS: ${stream.fps}<br>` : ''}
+                    ${stream.bitrate ? `Bitrate: ${stream.bitrate}` : ''}
+                `;
+            } else {
+                details = `
+                    <strong>${stream.language || 'Default'}</strong><br>
+                    Codec: ${stream.codec}<br>
+                    Sample Rate: ${stream.sampleRate}<br>
+                    ${stream.bitrate ? `Bitrate: ${stream.bitrate}` : ''}
+                `;
+            }
+            
+            div.innerHTML = details;
+
+            div.onclick = () => {
+                document.querySelectorAll(`.quality-option[data-type="${type}"]`)
+                    .forEach(opt => opt.classList.remove('selected'));
+                div.classList.add('selected');
+                
+                if (type === 'video') {
+                    selectedVideo = stream;
+                } else {
+                    selectedAudio = stream;
+                }
+                updateSelectedTracks();
+            };
+
+            div.setAttribute('data-type', type);
+            return div;
+        }
+
+        loadStreamButton.addEventListener("click", async () => {
+            const hlsUrl = hlsUrlInput.value.trim();
+            if (!hlsUrl) {
+                return showError("Please enter an HLS URL");
+            }
+
+            loadStreamButton.disabled = true;
+            videoQualities.innerHTML = "";
+            audioTracks.innerHTML = "";
+            selectedVideo = null;
+            selectedAudio = null;
+            updateSelectedTracks();
+
             try {
                 const response = await fetch("/getStreams", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ hlsUrl })
+                    body: JSON.stringify({ hlsUrl: url })
                 });
 
-                if (!response.ok) throw new Error("Failed to fetch stream info");
-                const { streams } = await response.json();
-                displayStreams(streams);
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+
+                const data = await response.json();
+                streamInfo = data;
+
+                const videoStreams = data.streams.filter(s => s.type === 'video');
+                const audioStreams = data.streams.filter(s => s.type === 'audio');
+
+                videoStreams.forEach(stream => {
+                    videoQualities.appendChild(createQualityOption(stream, 'video'));
+                });
+
+                audioStreams.forEach(stream => {
+                    audioTracks.appendChild(createQualityOption(stream, 'audio'));
+                });
+
+                if (Hls.isSupported()) {
+                    const hls = new Hls({
+                        debug: false,
+                        enableWorker: true
+                    });
+                    hls.loadSource(hlsUrl);
+                    hls.attachMedia(videoPlayer);
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        videoPlayer.play().catch(e => console.log("Auto-play prevented"));
+                    });
+                }
+
+                showSuccess("Stream loaded successfully");
             } catch (error) {
-                output.innerHTML = `<p style="color: red;">${error.message}</p>`;
+                showError(error.message || "Failed to load stream");
+            } finally {
+                loadStreamButton.disabled = false;
             }
         });
 
-        function displayStreams(streams) {
-            output.innerHTML = `<h2>Stream Information</h2>`;
-            if (streams.length === 0) {
-                output.innerHTML += `<p>No streams found.</p>`;
-                return;
+        downloadButton.addEventListener("click", async () => {
+            if (!selectedVideo || !selectedAudio) {
+                return showError("Please select both video and audio tracks");
             }
 
-            const list = document.createElement("ul");
-            streams.forEach((stream, index) => {
-                const item = document.createElement("li");
-                item.textContent = `${index + 1}. Type: ${stream.type}, Codec: ${stream.codec}, ${
-                    stream.type === "video" ? `Resolution: ${stream.resolution}` : `Sample Rate: ${stream.sampleRate} Hz`
-                }`;
-                list.appendChild(item);
-            });
-            output.appendChild(list);
-        }
+            downloadButton.disabled = true;
+            const progressContainer = document.querySelector('.progress-container');
+            progressContainer.style.display = 'block';
+
+            try {
+                const response = await fetch('/downloadStream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        hlsUrl: hlsUrlInput.value.trim(),
+                        videoIndex: selectedVideo.index,
+                        audioIndex: selectedAudio.index,
+                        duration: -1 // Full duration
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.style.display = "none";
+                a.href = url;
+                a.download = `video_${selectedVideo.resolution}_${selectedAudio.language || 'default'}.mp4`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                showSuccess("Download completed successfully");
+            } catch (error) {
+                showError(error.message || "Failed to download stream");
+            } finally {
+                downloadButton.disabled = false;
+            }
+        });
+
+        initWebSocket();
     </script>
 </body>
 </html>
