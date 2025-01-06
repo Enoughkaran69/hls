@@ -65,32 +65,38 @@ app.post("/getStreams", (req, res) => {
         return res.status(400).send("HLS URL is required.");
     }
 
-    // Use ffmpeg to extract stream details
-    const ffmpegCommand = [
-        'ffmpeg', 
-        '-i', hlsUrl, 
-        '-hide_banner' // Suppress verbose info except stream details
-    ];
-
-    const ffmpegProcess = spawn(ffmpegCommand[0], ffmpegCommand.slice(1));
-
-    let stderrData = '';
-
-    ffmpegProcess.stderr.on('data', (data) => {
-        stderrData += data.toString();
-    });
-
-    ffmpegProcess.on('close', (code) => {
-        if (code === 0) {
-            const streams = parseFFMpegStreams(stderrData);
-            console.log('Sending stream information to client:', streams);
-            res.json({ streams });
-        } else {
-            console.error(`ffmpeg process failed with code ${code}`);
-            res.status(500).send("Failed to fetch stream information.");
+    // Fetch the HLS playlist content (m3u8 file)
+    exec(`curl -s "${hlsUrl}"`, (error, stdout, stderr) => {
+        if (error) {
+            console.error(`Error fetching HLS playlist: ${stderr || error.message}`);
+            return res.status(500).send("Failed to fetch HLS playlist.");
         }
+
+        // Parse the HLS playlist to find stream information
+        const streams = parseHLSPlaylist(stdout);
+        
+        // Send the parsed stream data to the client
+        res.json({ streams });
     });
 });
+
+// Function to parse the HLS playlist and extract stream info
+const parseHLSPlaylist = (playlistContent) => {
+    const streamDetails = [];
+    const streamPattern = /#EXT-X-STREAM-INF:BANDWIDTH=(\d+),RESOLUTION=(\d+x\d+).*?\n([^#]+)/gi;
+
+    let match;
+    while ((match = streamPattern.exec(playlistContent)) !== null) {
+        const [_, bandwidth, resolution, url] = match;
+        streamDetails.push({
+            bandwidth: parseInt(bandwidth),
+            resolution: resolution,
+            url: url.trim()
+        });
+    }
+
+    return streamDetails;
+};
 
 server.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);
