@@ -81,26 +81,31 @@
             display: block;
         }
 
-        #streamDetails {
+        .stream-section {
             background: white;
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
         }
 
-        .stream-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px;
+        .quality-selector {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+
+        .quality-option {
+            padding: 10px;
             border: 1px solid #ddd;
-            margin-bottom: 10px;
             border-radius: 6px;
-            background: white;
+            cursor: pointer;
         }
 
-        .stream-info {
-            flex: 1;
+        .quality-option.selected {
+            border-color: var(--primary-color);
+            background-color: #eff6ff;
         }
 
         .progress-container {
@@ -108,15 +113,25 @@
             background-color: #ddd;
             border-radius: 4px;
             margin: 10px 0;
-            display: none;
+            height: 20px;
+            overflow: hidden;
         }
 
         .progress-bar {
             width: 0%;
-            height: 20px;
+            height: 100%;
             background-color: var(--primary-color);
-            border-radius: 4px;
             transition: width 0.3s ease;
+            position: relative;
+        }
+
+        .progress-text {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-size: 12px;
+            line-height: 20px;
         }
 
         .alert {
@@ -137,6 +152,22 @@
             color: var(--success-color);
             border: 1px solid #86efac;
         }
+
+        .download-options {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8fafc;
+            border-radius: 6px;
+        }
+
+        .language-tag {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            margin-right: 5px;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -155,88 +186,158 @@
             <video id="videoPlayer" controls></video>
         </div>
 
-        <div id="streamDetails">
-            <h3>Available Streams</h3>
-            <div id="streamList"></div>
+        <div class="stream-section">
+            <h3>Video Qualities</h3>
+            <div id="videoQualities" class="quality-selector"></div>
+        </div>
+
+        <div class="stream-section">
+            <h3>Audio Tracks</h3>
+            <div id="audioTracks" class="quality-selector"></div>
+        </div>
+
+        <div class="stream-section">
+            <h3>Download Options</h3>
+            <div class="download-options">
+                <div id="selectedTracks"></div>
+                <button id="downloadButton" disabled>Start Download</button>
+                <div class="progress-container" style="display: none;">
+                    <div class="progress-bar">
+                        <span class="progress-text">0%</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script>
         let ws;
+        let selectedVideo = null;
+        let selectedAudio = null;
+        let streamInfo = null;
+
         const loadStreamButton = document.getElementById("loadStream");
         const hlsUrlInput = document.getElementById("hlsUrl");
         const videoPlayer = document.getElementById("videoPlayer");
-        const streamList = document.getElementById("streamList");
+        const videoQualities = document.getElementById("videoQualities");
+        const audioTracks = document.getElementById("audioTracks");
+        const downloadButton = document.getElementById("downloadButton");
         const errorAlert = document.getElementById("errorAlert");
         const successAlert = document.getElementById("successAlert");
+        const selectedTracks = document.getElementById("selectedTracks");
 
-        // Initialize WebSocket connection
         function initWebSocket() {
             ws = new WebSocket(`ws://${window.location.host}`);
             
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 if (data.progress !== undefined) {
-                    updateProgress(data.filename, data.progress);
+                    updateProgress(data.progress);
                 }
             };
 
-            ws.onerror = (error) => {
-                showError("WebSocket connection error");
-            };
-
-            ws.onclose = () => {
-                setTimeout(initWebSocket, 5000); // Reconnect after 5 seconds
-            };
+            ws.onerror = () => showError("WebSocket connection error");
+            ws.onclose = () => setTimeout(initWebSocket, 5000);
         }
 
         function showError(message) {
             errorAlert.textContent = message;
             errorAlert.style.display = "block";
             successAlert.style.display = "none";
-            setTimeout(() => {
-                errorAlert.style.display = "none";
-            }, 5000);
+            setTimeout(() => errorAlert.style.display = "none", 5000);
         }
 
         function showSuccess(message) {
             successAlert.textContent = message;
             successAlert.style.display = "block";
             errorAlert.style.display = "none";
-            setTimeout(() => {
-                successAlert.style.display = "none";
-            }, 5000);
+            setTimeout(() => successAlert.style.display = "none", 5000);
         }
 
-        function updateProgress(filename, progress) {
-            const progressBar = document.querySelector(`[data-filename="${filename}"] .progress-bar`);
-            const progressContainer = document.querySelector(`[data-filename="${filename}"] .progress-container`);
-            
-            if (progressContainer && progressBar) {
-                progressContainer.style.display = "block";
-                progressBar.style.width = `${progress}%`;
-                
-                if (progress >= 100) {
-                    setTimeout(() => {
-                        progressContainer.style.display = "none";
-                    }, 2000);
-                }
+        function updateProgress(progress) {
+            const progressContainer = document.querySelector('.progress-container');
+            const progressBar = document.querySelector('.progress-bar');
+            const progressText = document.querySelector('.progress-text');
+
+            progressContainer.style.display = 'block';
+            progressBar.style.width = `${progress}%`;
+            progressText.textContent = `${progress}%`;
+
+            if (progress >= 100) {
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    progressBar.style.width = '0%';
+                }, 2000);
             }
         }
 
-        loadStreamButton.addEventListener("click", () => {
+        function updateSelectedTracks() {
+            let html = '<p><strong>Selected tracks:</strong><br>';
+            if (selectedVideo) {
+                html += `Video: ${selectedVideo.resolution} (${selectedVideo.codec})<br>`;
+            }
+            if (selectedAudio) {
+                html += `Audio: ${selectedAudio.language || 'Default'} - ${selectedAudio.codec} ${selectedAudio.sampleRate}`;
+            }
+            html += '</p>';
+            selectedTracks.innerHTML = html;
+            downloadButton.disabled = !(selectedVideo && selectedAudio);
+        }
+
+        function createQualityOption(stream, type) {
+            const div = document.createElement('div');
+            div.className = 'quality-option';
+            
+            let details = '';
+            if (type === 'video') {
+                details = `
+                    <strong>${stream.resolution}</strong><br>
+                    Codec: ${stream.codec}<br>
+                    ${stream.fps ? `FPS: ${stream.fps}<br>` : ''}
+                    ${stream.bitrate ? `Bitrate: ${stream.bitrate}` : ''}
+                `;
+            } else {
+                details = `
+                    <strong>${stream.language || 'Default'}</strong><br>
+                    Codec: ${stream.codec}<br>
+                    Sample Rate: ${stream.sampleRate}<br>
+                    ${stream.bitrate ? `Bitrate: ${stream.bitrate}` : ''}
+                `;
+            }
+            
+            div.innerHTML = details;
+
+            div.onclick = () => {
+                document.querySelectorAll(`.quality-option[data-type="${type}"]`)
+                    .forEach(opt => opt.classList.remove('selected'));
+                div.classList.add('selected');
+                
+                if (type === 'video') {
+                    selectedVideo = stream;
+                } else {
+                    selectedAudio = stream;
+                }
+                updateSelectedTracks();
+            };
+
+            div.setAttribute('data-type', type);
+            return div;
+        }
+
+        loadStreamButton.addEventListener("click", async () => {
             const hlsUrl = hlsUrlInput.value.trim();
             if (!hlsUrl) {
                 return showError("Please enter an HLS URL");
             }
 
             loadStreamButton.disabled = true;
-            streamList.innerHTML = "";
-            loadHLSStream(hlsUrl);
-        });
+            videoQualities.innerHTML = "";
+            audioTracks.innerHTML = "";
+            selectedVideo = null;
+            selectedAudio = null;
+            updateSelectedTracks();
 
-        async function loadHLSStream(url) {
             try {
                 const response = await fetch("/getStreams", {
                     method: "POST",
@@ -249,58 +350,58 @@
                 }
 
                 const data = await response.json();
-                
-                if (data.streams.length === 0) {
-                    showError("No streams found in the provided URL");
-                    return;
-                }
+                streamInfo = data;
 
-                data.streams.forEach((stream, index) => {
-                    const streamItem = document.createElement("div");
-                    streamItem.className = "stream-item";
-                    streamItem.innerHTML = `
-                        <div class="stream-info">
-                            <strong>Stream ${index + 1}</strong>
-                            <p>Type: ${stream.type}
-                            ${stream.resolution ? `<br>Resolution: ${stream.resolution}` : ''}
-                            ${stream.codec ? `<br>Codec: ${stream.codec}` : ''}
-                            ${stream.sampleRate ? `<br>Sample Rate: ${stream.sampleRate}` : ''}</p>
-                            <div class="progress-container" data-filename="stream_${index}">
-                                <div class="progress-bar"></div>
-                            </div>
-                        </div>
-                        <button onclick="downloadStream(${index})">Download</button>
-                    `;
-                    streamList.appendChild(streamItem);
+                const videoStreams = data.streams.filter(s => s.type === 'video');
+                const audioStreams = data.streams.filter(s => s.type === 'audio');
+
+                videoStreams.forEach(stream => {
+                    videoQualities.appendChild(createQualityOption(stream, 'video'));
                 });
 
-                if (Hls.isSupported() && data.streams.some(s => s.type === 'video')) {
-                    const hls = new Hls();
-                    hls.loadSource(url);
+                audioStreams.forEach(stream => {
+                    audioTracks.appendChild(createQualityOption(stream, 'audio'));
+                });
+
+                if (Hls.isSupported()) {
+                    const hls = new Hls({
+                        debug: false,
+                        enableWorker: true
+                    });
+                    hls.loadSource(hlsUrl);
                     hls.attachMedia(videoPlayer);
                     hls.on(Hls.Events.MANIFEST_PARSED, () => {
                         videoPlayer.play().catch(e => console.log("Auto-play prevented"));
                     });
                 }
 
-                showSuccess("Streams loaded successfully");
+                showSuccess("Stream loaded successfully");
             } catch (error) {
-                showError(error.message || "Failed to load streams");
+                showError(error.message || "Failed to load stream");
             } finally {
                 loadStreamButton.disabled = false;
             }
-        }
+        });
 
-        async function downloadStream(streamIndex) {
-            const hlsUrl = hlsUrlInput.value.trim();
-            const button = event.target;
-            button.disabled = true;
+        downloadButton.addEventListener("click", async () => {
+            if (!selectedVideo || !selectedAudio) {
+                return showError("Please select both video and audio tracks");
+            }
+
+            downloadButton.disabled = true;
+            const progressContainer = document.querySelector('.progress-container');
+            progressContainer.style.display = 'block';
 
             try {
                 const response = await fetch('/downloadStream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ hlsUrl, streamIndex })
+                    body: JSON.stringify({
+                        hlsUrl: hlsUrlInput.value.trim(),
+                        videoIndex: selectedVideo.index,
+                        audioIndex: selectedAudio.index,
+                        duration: -1 // Full duration
+                    })
                 });
 
                 if (!response.ok) {
@@ -312,7 +413,7 @@
                 const a = document.createElement("a");
                 a.style.display = "none";
                 a.href = url;
-                a.download = `stream_${streamIndex + 1}.mp4`;
+                a.download = `video_${selectedVideo.resolution}_${selectedAudio.language || 'default'}.mp4`;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
@@ -320,11 +421,10 @@
             } catch (error) {
                 showError(error.message || "Failed to download stream");
             } finally {
-                button.disabled = false;
+                downloadButton.disabled = false;
             }
-        }
+        });
 
-        // Initialize WebSocket connection when page loads
         initWebSocket();
     </script>
 </body>
