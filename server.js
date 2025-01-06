@@ -1,10 +1,9 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
-const { exec } = require("child_process");
+const { spawn } = require("child_process");
 const WebSocket = require("ws");
 const http = require("http");
-const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -66,18 +65,30 @@ app.post("/getStreams", (req, res) => {
         return res.status(400).send("HLS URL is required.");
     }
 
-    // Use ffprobe instead of ffmpeg for better stream information
-    const command = `ffprobe -v error -show_entries stream=index,codec_name,codec_type,width,height,sample_rate,channels,channel_layout -of json "${hlsUrl}"`;
+    // Use ffmpeg to extract stream details
+    const ffmpegCommand = [
+        'ffmpeg', 
+        '-i', hlsUrl, 
+        '-hide_banner' // Suppress verbose info except stream details
+    ];
 
-    exec(command, (error, stdout, stderr) => {
-        if (error && !stderr) {
-            console.error(`exec error: ${error}`);
-            return res.status(500).send("Failed to fetch stream information.");
+    const ffmpegProcess = spawn(ffmpegCommand[0], ffmpegCommand.slice(1));
+
+    let stderrData = '';
+
+    ffmpegProcess.stderr.on('data', (data) => {
+        stderrData += data.toString();
+    });
+
+    ffmpegProcess.on('close', (code) => {
+        if (code === 0) {
+            const streams = parseFFMpegStreams(stderrData);
+            console.log('Sending stream information to client:', streams);
+            res.json({ streams });
+        } else {
+            console.error(`ffmpeg process failed with code ${code}`);
+            res.status(500).send("Failed to fetch stream information.");
         }
-
-        const streams = parseFFMpegStreams(stderr);
-        console.log('Sending stream information to client:', streams);
-        res.json({ streams });
     });
 });
 
